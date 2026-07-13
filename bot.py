@@ -134,7 +134,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if await is_subscribed(context.bot, user_id):
         await update.message.reply_text(
-            "Salom! Kino qidirish uchun pastdagi tugmani bosing 👇",
+            "Assalomu alekum",
             reply_markup=MAIN_KEYBOARD,
         )
     else:
