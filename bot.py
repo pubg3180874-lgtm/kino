@@ -35,8 +35,8 @@ from telegram.ext import (
 # ============== SOZLAMALAR (.env faylidan o'qiladi) ==============
 load_dotenv()
 
-BOT_TOKEN = os.getenv("8438146645:AAFS5q5U6NHRStjEy5oUZftmUNXWNeVeE9A")
-_admin_id_raw = os.getenv("7480459140")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+_admin_id_raw = os.getenv("ADMIN_ID")
 DB_PATH = "movies.db"
 
 if not BOT_TOKEN or not _admin_id_raw:
