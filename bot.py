@@ -10,8 +10,8 @@ O'rnatish:
     pip install -r requirements.txt
 
 Sozlash:
-    Shu papkadagi ".env" faylini oching va BOT_TOKEN, ADMIN_ID qiymatlarini
-    yozing (bot.py faylini ochish shart emas).
+    Shu papkadagi ".env" faylini oching va BOT_TOKEN, ADMIN_ID, CHANNEL_USERNAME
+    qiymatlarini yozing (bot.py faylini ochish shart emas).
 
 Ishga tushirish:
     python bot.py
@@ -23,6 +23,7 @@ import logging
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -37,6 +38,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 _admin_id_raw = os.getenv("ADMIN_ID")
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")  # masalan: @mening_kanalim
 DB_PATH = "movies.db"
 
 if not BOT_TOKEN or not _admin_id_raw:
@@ -104,15 +106,72 @@ MAIN_KEYBOARD = InlineKeyboardMarkup(
 )
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Salom! Kino qidirish uchun pastdagi tugmani bosing 👇",
-        reply_markup=MAIN_KEYBOARD,
+def get_subscribe_keyboard():
+    channel_link = f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}"
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📢 Kanalga obuna bo'lish", url=channel_link)],
+            [InlineKeyboardButton("✅ Tekshirish", callback_data="check_sub")],
+        ]
     )
+
+
+async def is_subscribed(bot, user_id: int) -> bool:
+    """CHANNEL_USERNAME sozlanmagan bo'lsa, tekshiruv o'tkazilmaydi (True qaytadi)."""
+    if not CHANNEL_USERNAME:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        return member.status in ("member", "administrator", "creator")
+    except TelegramError as e:
+        logger.warning("Obunani tekshirishda xatolik: %s", e)
+        # Bot kanalga admin qilib qo'shilmagan bo'lishi mumkin — shunday holatda
+        # foydalanuvchini bloklab qo'ymaslik uchun False qaytaramiz va log yozamiz.
+        return False
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if await is_subscribed(context.bot, user_id):
+        await update.message.reply_text(
+            "Salom! Kino qidirish uchun pastdagi tugmani bosing 👇",
+            reply_markup=MAIN_KEYBOARD,
+        )
+    else:
+        await update.message.reply_text(
+            "Botdan foydalanish uchun avval kanalimizga obuna bo'ling, "
+            "so'ng \"✅ Tekshirish\" tugmasini bosing.",
+            reply_markup=get_subscribe_keyboard(),
+        )
+
+
+async def check_sub_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    if await is_subscribed(context.bot, user_id):
+        await query.answer("Obuna tasdiqlandi ✅")
+        await query.message.edit_text(
+            "Rahmat! Endi kino qidirish uchun pastdagi tugmani bosing 👇",
+            reply_markup=MAIN_KEYBOARD,
+        )
+    else:
+        await query.answer("Siz hali obuna bo'lmagansiz ❌", show_alert=True)
 
 
 async def search_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = update.effective_user.id
+
+    if not await is_subscribed(context.bot, user_id):
+        await query.answer()
+        await query.message.reply_text(
+            "Botdan foydalanish uchun avval kanalimizga obuna bo'ling, "
+            "so'ng \"✅ Tekshirish\" tugmasini bosing.",
+            reply_markup=get_subscribe_keyboard(),
+        )
+        return
+
     await query.answer()
     context.user_data["waiting_for_search"] = True
     await query.message.reply_text("Kino raqamini kiriting:")
@@ -200,6 +259,7 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(check_sub_button, pattern="^check_sub$"))
     app.add_handler(CallbackQueryHandler(search_button, pattern="^search_movie$"))
     app.add_handler(MessageHandler(filters.VIDEO | filters.Document.ALL, handle_video))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
